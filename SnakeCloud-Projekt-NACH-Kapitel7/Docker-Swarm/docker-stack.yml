@@ -1,0 +1,184 @@
+version: "3.9"
+
+networks:
+  snake:
+    driver: overlay
+    attachable: true
+
+volumes:
+  mariadb-data: {}
+
+secrets:
+  db_root:
+    file: ./secrets/mariadb_root_password.txt
+  db_app:
+    file: ./secrets/mariadb_app_password.txt
+  db_ssl_cert:
+    file: ./secrets/tls/server.crt
+  db_ssl_key:
+    file: ./secrets/tls/server.key
+  db_ssl_ca:
+    file: ./secrets/tls/ca.pem
+  web_cert:
+    file: ./secrets/tls/web.crt
+  web_key:
+    file: ./secrets/tls/web.key
+
+configs:
+  api_main_py:
+    file: ./api/main.py
+  web_index_html:
+    file: ./web/index.html
+  web_app_js:
+    file: ./web/app.js
+  nginx_conf:
+    file: ./configs/nginx.conf
+  apache_ssl_conf:
+    file: ./configs/apache-ssl.conf
+  web_healthz:
+    file: ./configs/healthz.txt
+  mariadb_tls_cnf:
+    file: ./configs/mariadb-tls.cnf
+
+services:
+  db:
+    image: mariadb:11
+    environment:
+      MARIADB_DATABASE: snakecloud
+      MARIADB_USER: snakeapp
+      MARIADB_PASSWORD_FILE: /run/secrets/db_app
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/db_root
+    secrets:
+      - db_root
+      - db_app
+      - source: db_ssl_cert
+        target: db_server_cert.pem
+      - source: db_ssl_key
+        target: db_server_key.pem
+      - source: db_ssl_ca
+        target: db_ca.pem
+    configs:
+      - source: mariadb_tls_cnf
+        target: /etc/mysql/conf.d/zz-tls.cnf
+    volumes:
+      - mariadb-data:/var/lib/mysql
+      - type: bind
+        source: /root/snakecloud/db
+        target: /docker-entrypoint-initdb.d
+        read_only: true
+    ports:
+      - target: 3306
+        published: 3306
+        protocol: tcp
+        mode: host
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == macloud-backend1.hanitlg.de
+    networks: [snake]
+
+  api:
+    image: tiangolo/uvicorn-gunicorn-fastapi:python3.11
+    environment:
+      APP_MODULE: main:app
+      DB_HOST: macloud-backend1.hanitlg.de
+      DB_PORT: "3306"
+      DB_NAME: snakecloud
+      DB_USER: snakeapp
+      DB_PASSWORD_FILE: /run/secrets/db_app
+      DB_SSLMODE: "require"
+      DB_SSL_CA: "/run/secrets/db_ssl_ca"
+      WEB_CONCURRENCY: "2"
+      GUNICORN_CMD_ARGS: "--timeout 30 --keep-alive 2"
+    configs:
+      - source: api_main_py
+        target: /app/main.py
+    secrets:
+      - db_app
+      - source: db_ssl_ca
+        target: db_ssl_ca
+    command: ["/bin/sh","-lc","pip install --no-cache-dir pymysql && /start.sh"]
+    deploy:
+      replicas: 10
+      update_config:
+        parallelism: 1
+        order: start-first
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname != macloud-backend1.hanitlg.de
+    networks: [snake]
+
+  web_nginx:
+    image: owasp/modsecurity-crs:4.4.0-nginx
+    ports:
+      - target: 8443
+        published: 443
+        protocol: tcp
+        mode: ingress
+    environment:
+      NGINX_DOLLAR: "$$"
+    configs:
+      - source: nginx_conf
+        target: /etc/nginx/templates/conf.d/default.conf.template
+      - source: web_index_html
+        target: /usr/share/nginx/html/index.html
+      - source: web_app_js
+        target: /usr/share/nginx/html/app.js
+    secrets:
+      - source: web_cert
+        target: web_cert.pem
+      - source: web_key
+        target: web_key.pem
+    deploy:
+      replicas: 10
+      update_config:
+        parallelism: 2
+        order: start-first
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname != macloud-backend1.hanitlg.de
+    networks: [snake]
+
+  web_apache:
+    image: httpd:2.4.62
+    ports:
+      - target: 443
+        published: 10443
+        protocol: tcp
+        mode: ingress
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        grep -q 'Include conf/extra/snake-ssl.conf' /usr/local/apache2/conf/httpd.conf \
+        || echo 'Include conf/extra/snake-ssl.conf' >> /usr/local/apache2/conf/httpd.conf;
+        exec /usr/local/apache2/bin/httpd -DFOREGROUND
+    configs:
+      - source: apache_ssl_conf
+        target: /usr/local/apache2/conf/extra/snake-ssl.conf
+      - source: web_index_html
+        target: /usr/local/apache2/htdocs/index.html
+      - source: web_app_js
+        target: /usr/local/apache2/htdocs/app.js
+      - source: web_healthz
+        target: /usr/local/apache2/htdocs/healthz
+    secrets:
+      - source: web_cert
+        target: web_cert.pem
+      - source: web_key
+        target: web_key.pem
+    deploy:
+      replicas: 10
+      update_config:
+        parallelism: 2
+        order: start-first
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname != macloud-backend1.hanitlg.de
+    networks: [snake]

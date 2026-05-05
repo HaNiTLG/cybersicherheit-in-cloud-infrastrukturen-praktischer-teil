@@ -1,0 +1,129 @@
+version: "3.9"
+
+networks:
+  snake:
+    driver: overlay
+    attachable: true
+
+volumes:
+  mariadb-data: {}
+
+secrets:
+  db_root:
+    file: ./secrets/mariadb_root_password.txt
+  db_app:
+    file: ./secrets/mariadb_app_password.txt
+
+configs:
+  api_main_py:
+    file: ./api/main.py
+  web_index_html:
+    file: ./web/index.html
+  web_app_js:
+    file: ./web/app.js
+  nginx_conf:
+    file: ./configs/nginx.conf
+  apache_conf:
+    file: ./configs/apache-snake.conf
+
+services:
+  db:
+    image: mariadb:11
+    environment:
+      MARIADB_DATABASE: snakecloud
+      MARIADB_USER: snakeapp
+      MARIADB_PASSWORD_FILE: /run/secrets/db_app
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/db_root
+    secrets: [db_root, db_app]
+    volumes:
+      - mariadb-data:/var/lib/mysql
+      - type: bind
+        source: /root/snakecloud/db
+        target: /docker-entrypoint-initdb.d
+        read_only: true
+    ports:
+      - target: 3306
+        published: 3306
+        protocol: tcp
+        mode: host
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == macloud-backend1.hanitlg.de
+    networks: [snake]
+
+  api:
+    image: tiangolo/uvicorn-gunicorn-fastapi:python3.11
+    environment:
+      APP_MODULE: main:app
+      DB_HOST: macloud-backend1.hanitlg.de
+      DB_PORT: "3306"
+      DB_NAME: snakecloud
+      DB_USER: snakeapp
+      DB_PASSWORD_FILE: /run/secrets/db_app
+      SESSION_SECRET: "6f5b9c1a8d4e2f7a3b1c9d0e5f2a7c4b1d9e6f0a2c3b4d5e6f7a8b9c0d1e2f3"
+    configs:
+      - source: api_main_py
+        target: /app/main.py
+    secrets: [db_app]
+    command: ["/bin/sh","-lc","pip install --no-cache-dir pymysql && /start.sh"]
+    deploy:
+      replicas: 10
+      update_config:
+        parallelism: 1
+        order: start-first
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname != macloud-backend1.hanitlg.de
+    networks: [snake]
+
+  web_nginx:
+    image: nginx:latest
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: ingress
+    configs:
+      - source: nginx_conf
+        target: /etc/nginx/conf.d/default.conf
+      - source: web_index_html
+        target: /usr/share/nginx/html/index.html
+      - source: web_app_js
+        target: /usr/share/nginx/html/app.js
+    deploy:
+      replicas: 10
+      placement:
+        constraints:
+          - node.hostname != macloud-backend1.hanitlg.de
+    networks: [snake]
+
+  web_apache:
+    image: httpd:2.4.28
+    ports:
+      - target: 80
+        published: 8080
+        protocol: tcp
+        mode: ingress
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        grep -q 'Include conf/extra/snake.conf' /usr/local/apache2/conf/httpd.conf \
+        || echo 'Include conf/extra/snake.conf' >> /usr/local/apache2/conf/httpd.conf;
+        exec /usr/local/apache2/bin/httpd -DFOREGROUND
+    configs:
+      - source: apache_conf
+        target: /usr/local/apache2/conf/extra/snake.conf
+      - source: web_index_html
+        target: /usr/local/apache2/htdocs/index.html
+      - source: web_app_js
+        target: /usr/local/apache2/htdocs/app.js
+    deploy:
+      replicas: 10
+      placement:
+        constraints:
+          - node.hostname != macloud-backend1.hanitlg.de
+    networks: [snake]

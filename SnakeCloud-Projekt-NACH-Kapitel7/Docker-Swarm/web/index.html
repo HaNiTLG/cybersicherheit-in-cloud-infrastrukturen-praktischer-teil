@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>SnakeCloud</title>
+  <style>
+    :root{--bg:#0b1220;--panel:#0f172a;--text:#e6e9ef;--muted:#9aa4b2;--border:#334155;--accent:#22c55e;--danger:#ef4444}
+    *{box-sizing:border-box}
+    body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:var(--bg);color:var(--text);overscroll-behavior:contain;user-select:none}
+    .wrap{max-width:1100px;margin:0 auto;padding:24px;display:flex;flex-direction:column;align-items:center}
+    h1{margin:0 0 4px;font-size:40px;text-align:center}
+    h1 small{display:block;font-size:14px;color:var(--muted);margin-top:4px}
+    .bar{display:flex;gap:8px;align-items:center;justify-content:center;background:var(--panel);border:1px solid var(--border);padding:12px;border-radius:12px;width:100%;max-width:980px;margin-top:10px;flex-wrap:wrap}
+    .btn{padding:.6rem .9rem;border-radius:10px;border:1px solid var(--border);background:#0b1324;color:var(--text);cursor:pointer}
+    .btn.primary{background:var(--accent);border-color:#14532d;color:#062a14;font-weight:700}
+    .btn.ghost{background:transparent}
+    .muted{color:var(--muted)}
+    .game-wrap{position:relative;margin-top:16px;width:100%;max-width:980px;display:flex;justify-content:center}
+    canvas{background:#0b1324;border:1px solid var(--border);border-radius:12px;display:block;touch-action:none;outline:none;width:100%;height:auto}
+    .overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;pointer-events:none}
+    .overlay.show{display:flex}
+    .start-btn{font-size:24px;padding:16px 28px;border-radius:14px;border:1px solid #14532d;background:var(--accent);color:#062a14;cursor:pointer;font-weight:800;box-shadow:0 8px 24px rgba(34,197,94,.3);max-width:90%;pointer-events:auto}
+    .info{margin-top:8px;text-align:center}
+    .leader{margin-top:14px;background:var(--panel);border:1px solid var(--border);padding:12px;border-radius:12px;width:100%;max-width:980px}
+    .leader b{display:block;margin-bottom:6px}
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;padding:16px}
+    .modal.show{display:flex}
+    .card{background:#0e1627;border:1px solid var(--border);border-radius:14px;padding:16px;min-width:320px;max-width:90vw;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+    .row{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+    .in{padding:.6rem .8rem;border-radius:10px;border:1px solid var(--border);background:#0b1324;color:var(--text)}
+    .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
+    @media (max-width:480px){ h1{font-size:28px} .start-btn{font-size:20px} }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🐍 SnakeCloud <small>by Hani Hussein</small></h1>
+
+    <div class="bar">
+      <button id="btnOpenReg" class="btn">Registrieren</button>
+      <button id="btnOpenLogin" class="btn">Login</button>
+      <button id="btnPwd" class="btn" style="display:none">Passwort ändern</button>
+      <button id="btnLogout" class="btn" style="display:none">Logout</button>
+      <button id="btnPause" class="btn" style="display:none">Pause</button>
+      <span id="who" class="muted"></span>
+      <span id="msg" class="muted" style="margin-left:auto;margin-right:auto">Bitte registrieren oder einloggen, um zu spielen.</span>
+    </div>
+
+    <div class="game-wrap">
+      <canvas id="cv" width="900" height="600" tabindex="0" aria-label="Snake Spielfeld"></canvas>
+      <div id="start" class="overlay">
+        <button id="startBtn" class="start-btn">Start Game</button>
+      </div>
+    </div>
+
+    <div class="info">Score: <b id="sc">0</b> &nbsp; Highscore: <b id="hi">0</b></div>
+
+    <div class="leader">
+      <b>🏆 Top 5</b>
+      <ol id="board" style="margin:6px 0 0 18px"></ol>
+    </div>
+  </div>
+
+  <div id="modalReg" class="modal">
+    <div class="card">
+      <h3 style="margin:0">Registrieren</h3>
+      <div class="row">
+        <input id="regUser" class="in" placeholder="Username">
+        <input id="regMail" class="in" placeholder="E-Mail">
+        <input id="regPass" class="in" placeholder="Passwort" type="password">
+        <input id="regPass2" class="in" placeholder="Passwort wiederholen" type="password">
+      </div>
+      <div class="actions">
+        <button id="regCancel" class="btn ghost">Abbrechen</button>
+        <button id="regGo" class="btn primary">Registrieren</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalLogin" class="modal">
+    <div class="card">
+      <h3 style="margin:0">Login</h3>
+      <div class="row">
+        <input id="logUser" class="in" placeholder="Username">
+        <input id="logPass" class="in" placeholder="Passwort" type="password">
+      </div>
+      <div class="actions">
+        <button id="logCancel" class="btn ghost">Abbrechen</button>
+        <button id="logGo" class="btn primary">Login</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalPwd" class="modal">
+    <div class="card">
+      <h3 style="margin:0">Passwort ändern</h3>
+      <div class="row">
+        <input id="pwOld" class="in" placeholder="Altes Passwort" type="password">
+        <input id="pwNew1" class="in" placeholder="Neues Passwort" type="password">
+        <input id="pwNew2" class="in" placeholder="Neues Passwort (wiederholen)" type="password">
+      </div>
+      <div class="actions">
+        <button id="pwCancel" class="btn ghost">Abbrechen</button>
+        <button id="pwSave" class="btn primary">Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>
